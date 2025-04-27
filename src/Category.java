@@ -20,7 +20,7 @@ public class Category {
         return books;
     }
 
-    public void createBook(int id, String name, double price, String description, String coverPath) {
-        books.add(new Book(id, name, price, description, this, coverPath));
+    public void createBook(int id, String name, double price, String description, String coverPath, int stock) {
+        books.add(new Book(id, name, price, description, this, coverPath, stock));
     }
 }

@@ -1,1003 +1,967 @@
 package com.bookstore;
 
-import javax.swing.*;
-import javax.swing.table.*;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.event.TreeSelectionListener;
-import java.awt.*;
+import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.FXCollections;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.stage.FileChooser;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
 import java.text.DecimalFormat;
-import java.util.HashMap;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
+import java.util.regex.Pattern;
 
-public class MainWindow extends JFrame {
-    private BookStore store;
+public class MainWindow {
+    private final BookStore store;
     private User currentUser;
-    private JTabbedPane tabbedPane;
-    private Cart cart;
+    private final Cart cart;
+    private final Stage primaryStage;
+    private final TabPane tabPane;
+    private static final DecimalFormat RATING_FORMAT = new DecimalFormat("0.0");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$");
+    private static final Pattern DATE_PATTERN = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
 
-    public MainWindow(BookStore store) {
+    public MainWindow(BookStore store, Stage primaryStage) {
         this.store = store;
         this.cart = new Cart();
-        setTitle("Book Store");
-        setSize(1200, 800);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLocationRelativeTo(null);
+        this.primaryStage = primaryStage;
+        this.tabPane = new TabPane();
+        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-        // Убираем connect() и createTables(), так как они уже вызваны в BookStore
-        tabbedPane = new JTabbedPane();
-        tabbedPane.setFont(new Font("Arial", Font.PLAIN, 16));
-        updateTabs();
-        add(tabbedPane);
-        getContentPane().setBackground(new Color(240, 248, 255));
-        setVisible(true);
-
-        // Обработчик закрытия окна
-        addWindowListener(new java.awt.event.WindowAdapter() {
-            @Override
-            public void windowClosing(java.awt.event.WindowEvent windowEvent) {
-                try {
-                    store.getDb().close();
-                } catch (SQLException e) {
-                    System.err.println("Ошибка при закрытии базы данных: " + e.getMessage());
-                }
-                System.exit(0);
+        primaryStage.setTitle("Book Store");
+        primaryStage.setOnCloseRequest(e -> {
+            try {
+                store.getDb().close();
+            } catch (SQLException ex) {
+                System.err.println("Error closing database: " + ex.getMessage());
             }
+            Platform.exit();
         });
+
+        updateTabs();
+        Scene scene = new Scene(tabPane, 1200, 800);
+        primaryStage.setScene(scene);
+        primaryStage.show();
+
+        if (currentUser == null) {
+            showLoginOrRegisterDialog();
+        }
+    }
+
+    private void styleButton(Button button) {
+        button.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-size: 14px;");
+        button.setOnMouseEntered(e -> button.setStyle("-fx-background-color: #45a049; -fx-text-fill: white; -fx-font-size: 14px;"));
+        button.setOnMouseExited(e -> button.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-size: 14px;"));
+    }
+
+    private void showAlert(Alert.AlertType type, String title, String content) {
+        Alert alert = new Alert(type);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(content);
+        alert.showAndWait();
+    }
+
+    private boolean validateFirstName(String firstName) {
+        return firstName != null && firstName.length() >= 2 && firstName.length() <= 50 && firstName.matches("^[A-Za-z]+$");
+    }
+
+    private boolean validateLastName(String lastName) {
+        return lastName != null && lastName.length() >= 2 && lastName.length() <= 50 && lastName.matches("^[A-Za-z]+$");
+    }
+
+    private boolean validateLogin(String login) {
+        return login != null && login.length() >= 3 && login.length() <= 20 && login.matches("^[A-Za-z0-9_]+$");
+    }
+
+    private boolean validateEmail(String email) {
+        return email != null && EMAIL_PATTERN.matcher(email).matches();
+    }
+
+    private boolean validateBirthDate(String birthDate) {
+        if (birthDate == null || !DATE_PATTERN.matcher(birthDate).matches()) return false;
+        try {
+            LocalDate date = LocalDate.parse(birthDate, DateTimeFormatter.ISO_LOCAL_DATE);
+            return date.isBefore(LocalDate.now());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean validatePassword(String password) {
+        return password != null && password.length() >= 6 && password.length() <= 50;
+    }
+
+    private boolean validatePrice(String price) {
+        try {
+            double value = Double.parseDouble(price);
+            return value >= 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private boolean validateStock(String stock) {
+        try {
+            int value = Integer.parseInt(stock);
+            return value >= 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private void showLoginOrRegisterDialog() {
-        JPanel panel = new JPanel(new GridLayout(3, 1, 10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        JButton loginButton = new JButton("Login");
-        JButton registerButton = new JButton("Register");
-        panel.add(new JLabel("Please login or register to continue"));
-        panel.add(loginButton);
-        panel.add(registerButton);
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Login or Register");
 
-        JDialog dialog = new JDialog(this, "Login or Register", true);
-        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-        dialog.add(panel);
-        dialog.pack();
-        dialog.setLocationRelativeTo(this);
+        VBox vbox = new VBox(10);
+        vbox.setAlignment(Pos.CENTER);
+        vbox.setPadding(new Insets(20));
+        Label label = new Label("Please login or register to continue");
+        Button loginButton = new Button("Login");
+        Button registerButton = new Button("Register");
+        styleButton(loginButton);
+        styleButton(registerButton);
 
-        loginButton.addActionListener(e -> {
-            dialog.dispose();
+        loginButton.setOnAction(e -> {
+            dialog.close();
             showLoginDialog();
         });
-        registerButton.addActionListener(e -> {
-            dialog.dispose();
+        registerButton.setOnAction(e -> {
+            dialog.close();
             showRegisterDialog();
         });
 
-        dialog.setVisible(true);
+        vbox.getChildren().addAll(label, loginButton, registerButton);
+        Scene scene = new Scene(vbox, 300, 200);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 
     private void showLoginDialog() {
-        JTextField loginField = new JTextField(10);
-        JPasswordField passwordField = new JPasswordField(10);
-        JPanel panel = new JPanel(new GridLayout(2, 2, 10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        panel.add(new JLabel("Login:"));
-        panel.add(loginField);
-        panel.add(new JLabel("Password:"));
-        panel.add(passwordField);
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Login");
 
-        int result = JOptionPane.showConfirmDialog(this, panel, "Login", JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
+        GridPane grid = new GridPane();
+        grid.setPadding(new Insets(20));
+        grid.setVgap(10);
+        grid.setHgap(10);
+
+        Label loginLabel = new Label("Login:");
+        TextField loginField = new TextField();
+        Label passwordLabel = new Label("Password:");
+        PasswordField passwordField = new PasswordField();
+        Button loginButton = new Button("Login");
+        styleButton(loginButton);
+
+        GridPane.setConstraints(loginLabel, 0, 0);
+        GridPane.setConstraints(loginField, 1, 0);
+        GridPane.setConstraints(passwordLabel, 0, 1);
+        GridPane.setConstraints(passwordField, 1, 1);
+        GridPane.setConstraints(loginButton, 1, 2);
+
+        loginButton.setOnAction(e -> {
             String login = loginField.getText().trim();
-            String password = new String(passwordField.getPassword());
+            String password = passwordField.getText();
+            if (!validateLogin(login) || password.isEmpty()) {
+                showAlert(Alert.AlertType.ERROR, "Invalid input", "Login must be 3-20 characters, password cannot be empty.");
+                return;
+            }
             currentUser = store.findUser(login);
             if (currentUser == null || !currentUser.authenticate(password)) {
-                JOptionPane.showMessageDialog(this, "Invalid credentials", "Error", JOptionPane.ERROR_MESSAGE);
+                showAlert(Alert.AlertType.ERROR, "Error", "Invalid credentials");
                 showLoginOrRegisterDialog();
             } else {
+                dialog.close();
                 updateTabs();
             }
-        }
+        });
+
+        grid.getChildren().addAll(loginLabel, loginField, passwordLabel, passwordField, loginButton);
+        Scene scene = new Scene(grid, 400, 200);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 
     private void showRegisterDialog() {
-        JTextField nameField = new JTextField(10);
-        JTextField loginField = new JTextField(10);
-        JPasswordField passwordField = new JPasswordField(10);
-        JPasswordField confirmPasswordField = new JPasswordField(10);
-        JButton uploadButton = new JButton("Upload Avatar");
-        JLabel avatarLabel = new JLabel("No avatar selected");
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Register");
 
-        JPanel panel = new JPanel(new GridLayout(6, 2, 10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        panel.add(new JLabel("Name:"));
-        panel.add(nameField);
-        panel.add(new JLabel("Login:"));
-        panel.add(loginField);
-        panel.add(new JLabel("Password:"));
-        panel.add(passwordField);
-        panel.add(new JLabel("Confirm Password:"));
-        panel.add(confirmPasswordField);
-        panel.add(new JLabel("Avatar:"));
-        panel.add(uploadButton);
-        panel.add(new JLabel(""));
-        panel.add(avatarLabel);
+        GridPane grid = new GridPane();
+        grid.setPadding(new Insets(20));
+        grid.setVgap(10);
+        grid.setHgap(10);
+
+        Label firstNameLabel = new Label("First Name:");
+        TextField firstNameField = new TextField();
+        Label lastNameLabel = new Label("Last Name:");
+        TextField lastNameField = new TextField();
+        Label loginLabel = new Label("Login:");
+        TextField loginField = new TextField();
+        Label emailLabel = new Label("Email:");
+        TextField emailField = new TextField();
+        Label birthDateLabel = new Label("Birth Date (YYYY-MM-DD):");
+        TextField birthDateField = new TextField();
+        Label passwordLabel = new Label("Password:");
+        PasswordField passwordField = new PasswordField();
+        Label confirmPasswordLabel = new Label("Confirm Password:");
+        PasswordField confirmPasswordField = new PasswordField();
+        Label avatarLabel = new Label("Avatar: No file selected");
+        Button uploadButton = new Button("Upload Avatar");
+        Button registerButton = new Button("Register");
+        styleButton(uploadButton);
+        styleButton(registerButton);
+
+        GridPane.setConstraints(firstNameLabel, 0, 0);
+        GridPane.setConstraints(firstNameField, 1, 0);
+        GridPane.setConstraints(lastNameLabel, 0, 1);
+        GridPane.setConstraints(lastNameField, 1, 1);
+        GridPane.setConstraints(loginLabel, 0, 2);
+        GridPane.setConstraints(loginField, 1, 2);
+        GridPane.setConstraints(emailLabel, 0, 3);
+        GridPane.setConstraints(emailField, 1, 3);
+        GridPane.setConstraints(birthDateLabel, 0, 4);
+        GridPane.setConstraints(birthDateField, 1, 4);
+        GridPane.setConstraints(passwordLabel, 0, 5);
+        GridPane.setConstraints(passwordField, 1, 5);
+        GridPane.setConstraints(confirmPasswordLabel, 0, 6);
+        GridPane.setConstraints(confirmPasswordField, 1, 6);
+        GridPane.setConstraints(uploadButton, 0, 7);
+        GridPane.setConstraints(avatarLabel, 1, 7);
+        GridPane.setConstraints(registerButton, 1, 8);
 
         File[] selectedFile = {null};
-        uploadButton.addActionListener(e -> {
-            JFileChooser fileChooser = new JFileChooser();
-            fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Images", "jpg", "png"));
-            int returnVal = fileChooser.showOpenDialog(this);
-            if (returnVal == JFileChooser.APPROVE_OPTION) {
-                selectedFile[0] = fileChooser.getSelectedFile();
-                avatarLabel.setText(selectedFile[0].getName());
+        uploadButton.setOnAction(e -> {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Images", "*.jpg", "*.png"));
+            File file = fileChooser.showOpenDialog(primaryStage);
+            if (file != null) {
+                selectedFile[0] = file;
+                avatarLabel.setText(file.getName());
             }
         });
 
-        int result = JOptionPane.showConfirmDialog(this, panel, "Register", JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
-            String name = nameField.getText().trim();
+        registerButton.setOnAction(e -> {
+            String firstName = firstNameField.getText().trim();
+            String lastName = lastNameField.getText().trim();
             String login = loginField.getText().trim();
-            String password = new String(passwordField.getPassword());
-            String confirmPassword = new String(confirmPasswordField.getPassword());
+            String email = emailField.getText().trim();
+            String birthDate = birthDateField.getText().trim();
+            String password = passwordField.getText();
+            String confirmPassword = confirmPasswordField.getText();
 
-            if (name.isEmpty() || login.isEmpty() || password.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "All fields must be filled", "Error", JOptionPane.ERROR_MESSAGE);
-                showRegisterDialog();
+            if (!validateFirstName(firstName) || !validateLastName(lastName) || !validateLogin(login) ||
+                    !validateEmail(email) || !validateBirthDate(birthDate) || !validatePassword(password)) {
+                showAlert(Alert.AlertType.ERROR, "Invalid input", "Please check all fields.");
                 return;
             }
             if (login.equals("admin")) {
-                JOptionPane.showMessageDialog(this, "Login 'admin' is reserved", "Error", JOptionPane.ERROR_MESSAGE);
-                showRegisterDialog();
+                showAlert(Alert.AlertType.ERROR, "Error", "Login 'admin' is reserved");
                 return;
             }
             if (!password.equals(confirmPassword)) {
-                JOptionPane.showMessageDialog(this, "Passwords do not match", "Error", JOptionPane.ERROR_MESSAGE);
-                showRegisterDialog();
+                showAlert(Alert.AlertType.ERROR, "Error", "Passwords do not match");
                 return;
             }
             if (store.findUser(login) != null) {
-                JOptionPane.showMessageDialog(this, "Login already exists", "Error", JOptionPane.ERROR_MESSAGE);
-                showRegisterDialog();
+                showAlert(Alert.AlertType.ERROR, "Error", "Login already exists");
                 return;
             }
 
             try {
-                String avatarPath = uploadAvatar(selectedFile[0]);
-                store.registerUser(login, name, password, avatarPath);
-                JOptionPane.showMessageDialog(this, "Registration successful! Please login.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                String avatarPath = selectedFile[0] != null ? uploadFile(selectedFile[0], "avatars") : null;
+                store.registerUser(login, firstName, lastName, email, birthDate, password, avatarPath);
+                showAlert(Alert.AlertType.INFORMATION, "Success", "Registration successful! Please login.");
+                dialog.close();
                 showLoginDialog();
-            } catch (SQLException e) {
-                JOptionPane.showMessageDialog(this, "Registration failed: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                showRegisterDialog();
+            } catch (SQLException | IOException ex) {
+                showAlert(Alert.AlertType.ERROR, "Error", "Registration failed: " + ex.getMessage());
             }
-        }
+        });
+
+        grid.getChildren().addAll(
+                firstNameLabel, firstNameField, lastNameLabel, lastNameField,
+                loginLabel, loginField, emailLabel, emailField,
+                birthDateLabel, birthDateField, passwordLabel, passwordField,
+                confirmPasswordLabel, confirmPasswordField, uploadButton, avatarLabel, registerButton
+        );
+        Scene scene = new Scene(grid, 500, 400);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 
-    private String uploadAvatar(File sourceFile) {
+    private String uploadFile(File sourceFile, String destinationFolder) throws IOException {
         if (sourceFile == null) return null;
-        try {
-            File destFile = new File("avatars/" + sourceFile.getName());
-            Files.copy(sourceFile.toPath(), destFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            return destFile.getPath();
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, "Error uploading avatar: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-            return null;
+        File destDir = new File(destinationFolder);
+        if (!destDir.exists()) {
+            destDir.mkdirs();
         }
+        File destFile = new File(destinationFolder + "/" + sourceFile.getName());
+        Files.copy(sourceFile.toPath(), destFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        return destFile.getPath();
     }
 
     private void updateTabs() {
-        tabbedPane.removeAll();
+        tabPane.getTabs().clear();
         List<Category> categories = store.readCategories();
-        System.out.println("Количество категорий в updateTabs: " + categories.size());
 
         for (Category category : categories) {
-            JPanel panel = new JPanel(new BorderLayout(10, 10));
-            panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-            panel.setBackground(new Color(245, 245, 220));
-            DefaultTableModel model = new DefaultTableModel(new String[]{"ID", "Name", "Price", "Description", "Cover", "Rating", "Like", "Dislike"}, 0);
-            JTable table = new JTable(model);
-            table.setRowHeight(50);
-            table.setFont(new Font("Arial", Font.PLAIN, 12));
-            table.getColumn("Cover").setCellRenderer(new ImageRenderer());
-            table.getColumn("Cover").setPreferredWidth(100);
-            table.getColumn("Rating").setCellRenderer(new RatingRenderer());
-            table.getColumn("Like").setCellRenderer(new ButtonRenderer("Like"));
-            table.getColumn("Dislike").setCellRenderer(new ButtonRenderer("Dislike"));
-            table.getColumn("Like").setCellEditor(new ButtonEditor(new JButton("Like"), table, store));
-            table.getColumn("Dislike").setCellEditor(new ButtonEditor(new JButton("Dislike"), table, store));
-            loadBooks(category, model);
+            Tab tab = new Tab(category.getName());
+            VBox content = new VBox(10);
+            content.setPadding(new Insets(10));
+            content.setBackground(new Background(new BackgroundFill(Color.BEIGE, null, null)));
 
-            panel.add(new JScrollPane(table), BorderLayout.CENTER);
+            ComboBox<String> filterCombo = new ComboBox<>(FXCollections.observableArrayList(
+                    "Default", "Price (Ascending)", "Price (Descending)", "Popularity (Descending)",
+                    "Rating (Descending)", "Reviews (Descending)"
+            ));
+            filterCombo.setValue("Default");
 
-            JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 5));
-            buttonPanel.setBackground(new Color(245, 245, 220));
-            if (currentUser != null) {
-                System.out.println("Текущий пользователь: " + currentUser.getLogin() + ", роль: " + currentUser.getRole());
-                if (currentUser.getRole().equals("Admin")) {
-                    System.out.println("Отображаем кнопки админа для " + category.getName());
-                    JButton addButton = new JButton("Add Book");
-                    JButton editButton = new JButton("Edit Book");
-                    JButton deleteButton = new JButton("Delete Book");
-                    styleButton(addButton);
-                    styleButton(editButton);
-                    styleButton(deleteButton);
-
-                    addButton.addActionListener(e -> showAddBookDialog(category));
-                    editButton.addActionListener(e -> showEditBookDialog(category, table));
-                    deleteButton.addActionListener(e -> deleteBook(category, table));
-                    buttonPanel.add(addButton);
-                    buttonPanel.add(editButton);
-                    buttonPanel.add(deleteButton);
-                } else {
-                    System.out.println("Отображаем кнопки клиента для " + category.getName());
-                    JButton takeButton = new JButton("Take Book");
-                    JButton reviewButton = new JButton("Reviews");
-                    styleButton(takeButton);
-                    styleButton(reviewButton);
-                    takeButton.addActionListener(e -> takeBook(category, table));
-                    reviewButton.addActionListener(e -> showReviewsDialog(category, table));
-                    buttonPanel.add(takeButton);
-                    buttonPanel.add(reviewButton);
-                }
-            } else {
-                System.out.println("Пользователь не авторизован, кнопки не отображаются");
-                JButton takeButton = new JButton("Take Book");
-                JButton reviewButton = new JButton("Reviews");
-                styleButton(takeButton);
-                styleButton(reviewButton);
-                takeButton.addActionListener(e -> takeBook(category, table));
-                reviewButton.addActionListener(e -> showReviewsDialog(category, table));
-                buttonPanel.add(takeButton);
-                buttonPanel.add(reviewButton);
-            }
-            panel.add(buttonPanel, BorderLayout.SOUTH);
-            tabbedPane.addTab(category.getName(), panel);
-        }
-
-        if (currentUser != null && currentUser.getRole().equals("Client")) {
-            JPanel cartPanel = new JPanel(new BorderLayout(10, 10));
-            cartPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-            cartPanel.setBackground(new Color(245, 245, 220));
-            DefaultTableModel cartModel = new DefaultTableModel(new String[]{"ID", "Name", "Price", "Description", "Cover"}, 0);
-            JTable cartTable = new JTable(cartModel);
-            cartTable.setRowHeight(50);
-            cartTable.setFont(new Font("Arial", Font.PLAIN, 12));
-            cartTable.getColumn("Cover").setCellRenderer(new ImageRenderer());
-            cartTable.getColumn("Cover").setPreferredWidth(100);
-            loadCart(cartModel);
-
-            cartPanel.add(new JScrollPane(cartTable), BorderLayout.CENTER);
-
-            JPanel cartButtonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 5));
-            cartButtonPanel.setBackground(new Color(245, 245, 220));
-            JButton removeButton = new JButton("Remove from Cart");
-            styleButton(removeButton);
-            removeButton.addActionListener(e -> removeFromCart(cartTable));
-            cartButtonPanel.add(removeButton);
-
-            JLabel totalLabel = new JLabel("Total: " + calculateTotal());
-            totalLabel.setFont(new Font("Arial", Font.BOLD, 14));
-            totalLabel.setForeground(new Color(0, 100, 0));
-            cartButtonPanel.add(totalLabel);
-
-            cartPanel.add(cartButtonPanel, BorderLayout.SOUTH);
-            tabbedPane.addTab("Cart", cartPanel);
-        }
-
-        JPanel accountPanel = new JPanel(new BorderLayout(10, 10));
-        accountPanel.setBackground(new Color(245, 245, 220));
-        JLabel userLabel = new JLabel("Logged in as: " + (currentUser != null ? currentUser.getName() : "Guest"));
-        userLabel.setFont(new Font("Arial", Font.PLAIN, 14));
-        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
-        topPanel.setBackground(new Color(245, 245, 220));
-        topPanel.add(userLabel);
-
-        if (currentUser == null) {
-            JButton loginButton = new JButton("Login/Register");
-            styleButton(loginButton);
-            loginButton.addActionListener(e -> showLoginOrRegisterDialog());
-            topPanel.add(loginButton);
-        } else {
-            JButton logoutButton = new JButton("Log Out");
-            styleButton(logoutButton);
-            logoutButton.addActionListener(e -> logOut());
-            tabindex:            topPanel.add(logoutButton);
-        }
-        accountPanel.add(topPanel, BorderLayout.NORTH);
-
-        if (currentUser != null) {
-            DefaultTableModel usersModel = new DefaultTableModel(new String[]{"Login", "Name", "Avatar"}, 0);
-            JTable usersTable = new JTable(usersModel);
-            usersTable.setRowHeight(50);
-            usersTable.getColumn("Avatar").setCellRenderer(new ImageRenderer());
-            usersTable.getColumn("Avatar").setPreferredWidth(100);
-            loadUsers(usersModel);
-
-            JPanel usersPanel = new JPanel(new BorderLayout(10, 10));
-            usersPanel.add(new JScrollPane(usersTable), BorderLayout.CENTER);
-            JPanel usersButtonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 5));
-            usersButtonPanel.setBackground(new Color(245, 245, 220));
-            JButton switchButton = new JButton("Switch Account");
-            JButton deleteButton = new JButton("Delete Account");
-            styleButton(switchButton);
-            styleButton(deleteButton);
-            switchButton.addActionListener(e -> switchAccount(usersTable));
-            deleteButton.addActionListener(e -> deleteAccount(usersTable));
-            usersButtonPanel.add(switchButton);
-            usersButtonPanel.add(deleteButton);
-            usersPanel.add(usersButtonPanel, BorderLayout.SOUTH);
-            accountPanel.add(usersPanel, BorderLayout.CENTER);
-        }
-
-        tabbedPane.addTab("Account", accountPanel);
-    }
-
-    private void showReviewsDialog(Category category, JTable table) {
-        if (table.getSelectedRow() == -1) {
-            JOptionPane.showMessageDialog(this, "Please select a book to view reviews.", "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-        int bookId = (int) table.getValueAt(table.getSelectedRow(), 0);
-        JDialog dialog = new JDialog(this, "Reviews for Book ID: " + bookId, true);
-        dialog.setSize(600, 400);
-        dialog.setLocationRelativeTo(this);
-        dialog.setLayout(new BorderLayout(10, 10));
-
-        DefaultMutableTreeNode root = new DefaultMutableTreeNode("Reviews");
-        List<Review> reviews = store.getReviews(bookId);
-        Map<Integer, DefaultMutableTreeNode> reviewNodes = new HashMap<>();
-
-        // Создаём узлы для всех отзывов
-        for (Review review : reviews) {
-            String displayText = review.getUserLogin() + ": " + review.getText() +
-                    " (Likes: " + review.getLikes() + ", Dislikes: " + review.getDislikes() + ")";
-            DefaultMutableTreeNode node = new DefaultMutableTreeNode(displayText);
-            reviewNodes.put(review.getId(), node);
-        }
-
-        // Строим дерево с учётом parent_id
-        for (Review review : reviews) {
-            DefaultMutableTreeNode node = reviewNodes.get(review.getId());
-            if (review.getParentId() == null) {
-                root.add(node);
-            } else {
-                DefaultMutableTreeNode parentNode = reviewNodes.get(review.getParentId());
-                if (parentNode != null) {
-                    // Добавляем информацию о том, кому это ответ
-                    Review parentReview = reviews.stream()
-                            .filter(r -> r.getId() == review.getParentId())
-                            .findFirst()
-                            .orElse(null);
-                    if (parentReview != null) {
-                        node.setUserObject("В ответ на @" + parentReview.getUserLogin() + ": " + review.getText() +
-                                " (Likes: " + review.getLikes() + ", Dislikes: " + review.getDislikes() + ")");
+            TableView<Book> table = new TableView<>();
+            table.setRowFactory(tv -> {
+                TableRow<Book> row = new TableRow<>();
+                row.itemProperty().addListener((obs, oldBook, newBook) -> {
+                    if (newBook != null && newBook.getStock() == 0) {
+                        row.setStyle("-fx-background-color: #d3d3d3;");
+                    } else {
+                        row.setStyle("");
                     }
-                    parentNode.add(node);
-                } else {
-                    root.add(node); // Если родитель не найден, добавляем в корень
-                }
-            }
-        }
-
-        JTree reviewTree = new JTree(root);
-        reviewTree.setFont(new Font("Arial", Font.PLAIN, 12));
-        JScrollPane treeScrollPane = new JScrollPane(reviewTree);
-        dialog.add(treeScrollPane, BorderLayout.CENTER);
-
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 5));
-        if (currentUser != null) {
-            JButton likeButton = new JButton("Like");
-            JButton dislikeButton = new JButton("Dislike");
-            JButton replyButton = new JButton("Reply");
-            styleButton(likeButton);
-            styleButton(dislikeButton);
-            styleButton(replyButton);
-
-            TreeSelectionListener selectionListener = e -> {
-                DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) reviewTree.getLastSelectedPathComponent();
-                likeButton.setEnabled(selectedNode != null && selectedNode.getUserObject() != root.getUserObject());
-                dislikeButton.setEnabled(selectedNode != null && selectedNode.getUserObject() != root.getUserObject());
-                replyButton.setEnabled(selectedNode != null && selectedNode.getUserObject() != root.getUserObject());
-            };
-            reviewTree.addTreeSelectionListener(selectionListener);
-
-            likeButton.addActionListener(e -> {
-                DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) reviewTree.getLastSelectedPathComponent();
-                if (selectedNode != null && selectedNode.getUserObject() != root.getUserObject()) {
-                    Review selectedReview = reviews.get(reviewNodes.values().stream().toList().indexOf(selectedNode));
-                    try {
-                        String existingReaction = store.getDb().getUserReaction(currentUser.getLogin(), selectedReview.getId());
-                        if (existingReaction == null) {
-                            store.getDb().saveReaction(currentUser.getLogin(), selectedReview.getId(), "LIKE");
-                            selectedReview.setLikes(selectedReview.getLikes() + 1);
-                            store.getDb().updateReviewLikes(selectedReview.getId(), selectedReview.getLikes(), selectedReview.getDislikes());
-                            selectedNode.setUserObject("В ответ на @" + (selectedReview.getParentId() != null ? reviews.stream().filter(r -> r.getId() == selectedReview.getParentId()).findFirst().get().getUserLogin() : "") + ": " + selectedReview.getText() + " (Likes: " + selectedReview.getLikes() + ", Dislikes: " + selectedReview.getDislikes() + ")");
-                            reviewTree.updateUI();
-                        }
-                    } catch (SQLException ex) {
-                        JOptionPane.showMessageDialog(this, "Error liking review: " + ex.getMessage(), "Database Error", JOptionPane.ERROR_MESSAGE);
-                    }
-                }
+                });
+                return row;
             });
 
-            dislikeButton.addActionListener(e -> {
-                DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) reviewTree.getLastSelectedPathComponent();
-                if (selectedNode != null && selectedNode.getUserObject() != root.getUserObject()) {
-                    Review selectedReview = reviews.get(reviewNodes.values().stream().toList().indexOf(selectedNode));
-                    try {
-                        String existingReaction = store.getDb().getUserReaction(currentUser.getLogin(), selectedReview.getId());
-                        if (existingReaction == null) {
-                            store.getDb().saveReaction(currentUser.getLogin(), selectedReview.getId(), "DISLIKE");
-                            selectedReview.setDislikes(selectedReview.getDislikes() + 1);
-                            store.getDb().updateReviewLikes(selectedReview.getId(), selectedReview.getLikes(), selectedReview.getDislikes());
-                            selectedNode.setUserObject("В ответ на @" + (selectedReview.getParentId() != null ? reviews.stream().filter(r -> r.getId() == selectedReview.getParentId()).findFirst().get().getUserLogin() : "") + ": " + selectedReview.getText() + " (Likes: " + selectedReview.getLikes() + ", Dislikes: " + selectedReview.getDislikes() + ")");
-                            reviewTree.updateUI();
-                        }
-                    } catch (SQLException ex) {
-                        JOptionPane.showMessageDialog(this, "Error disliking review: " + ex.getMessage(), "Database Error", JOptionPane.ERROR_MESSAGE);
-                    }
-                }
-            });
+            TableColumn<Book, String> nameColumn = new TableColumn<>("Name");
+            nameColumn.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getName()));
 
-            replyButton.addActionListener(e -> {
-                DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) reviewTree.getLastSelectedPathComponent();
-                if (selectedNode != null && selectedNode.getUserObject() != root.getUserObject()) {
-                    Review selectedReview = reviews.get(reviewNodes.values().stream().toList().indexOf(selectedNode));
-                    String replyText = JOptionPane.showInputDialog(this, "Enter your reply:");
-                    if (replyText != null && !replyText.trim().isEmpty()) {
-                        try {
-                            store.addReview(bookId, currentUser.getLogin(), replyText, selectedReview.getId());
-                            Review newReply = new Review(reviews.size() + 1, bookId, currentUser.getLogin(), replyText, 0, 0);
-                            newReply.setParentId(selectedReview.getId());
-                            reviews.add(newReply);
-                            DefaultMutableTreeNode replyNode = new DefaultMutableTreeNode("В ответ на @" + selectedReview.getUserLogin() + ": " + replyText + " (Likes: 0, Dislikes: 0)");
-                            selectedNode.add(replyNode);
-                            reviewNodes.put(newReply.getId(), replyNode);
-                            reviewTree.updateUI();
-                        } catch (SQLException ex) {
-                            JOptionPane.showMessageDialog(this, "Error replying to review: " + ex.getMessage(), "Database Error", JOptionPane.ERROR_MESSAGE);
-                        }
-                    }
-                }
-            });
+            TableColumn<Book, String> priceColumn = new TableColumn<>("Price");
+            priceColumn.setCellValueFactory(cellData -> new SimpleStringProperty("$" + cellData.getValue().getPrice()));
 
-            buttonPanel.add(likeButton);
-            buttonPanel.add(dislikeButton);
-            buttonPanel.add(replyButton);
-        }
-
-        JTextArea reviewArea = new JTextArea(3, 40);
-        reviewArea.setLineWrap(true);
-        reviewArea.setWrapStyleWord(true);
-        JButton addReviewButton = new JButton("Add Review");
-        styleButton(addReviewButton);
-        addReviewButton.addActionListener(e -> {
-            String text = reviewArea.getText().trim();
-            if (!text.isEmpty()) {
+            TableColumn<Book, String> ratingColumn = new TableColumn<>("Rating");
+            ratingColumn.setCellValueFactory(cellData -> {
                 try {
-                    store.addReview(bookId, currentUser.getLogin(), text, null);
-                    Review newReview = new Review(reviews.size() + 1, bookId, currentUser.getLogin(), text, 0, 0);
-                    reviews.add(newReview);
-                    DefaultMutableTreeNode newNode = new DefaultMutableTreeNode(currentUser.getLogin() + ": " + text + " (Likes: 0, Dislikes: 0)");
-                    root.add(newNode);
-                    reviewNodes.put(newReview.getId(), newNode);
-                    reviewTree.updateUI();
-                    reviewArea.setText("");
-                } catch (SQLException ex) {
-                    JOptionPane.showMessageDialog(this, "Error adding review: " + ex.getMessage(), "Database Error", JOptionPane.ERROR_MESSAGE);
+                    double avgRating = store.getDb().getBookAverageRating(cellData.getValue().getId());
+                    int voteCount = store.getDb().getBookRatingCount(cellData.getValue().getId());
+                    return new SimpleStringProperty(RATING_FORMAT.format(avgRating) + " (" + voteCount + " votes)");
+                } catch (SQLException e) {
+                    return new SimpleStringProperty("N/A");
                 }
+            });
+
+            TableColumn<Book, String> stockColumn = new TableColumn<>("Stock");
+            stockColumn.setCellValueFactory(cellData -> {
+                int stock = cellData.getValue().getStock();
+                return new SimpleStringProperty(stock > 0 ? String.valueOf(stock) : "Sold Out");
+            });
+
+            table.getColumns().addAll(nameColumn, priceColumn, ratingColumn, stockColumn);
+            table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+            HBox buttons = new HBox(10);
+            Button addToCartButton = new Button("Add to Cart");
+            Button rateButton = new Button("Rate Book");
+            Button reviewButton = new Button("View/Add Review");
+            styleButton(addToCartButton);
+            styleButton(rateButton);
+            styleButton(reviewButton);
+            buttons.getChildren().addAll(addToCartButton, rateButton, reviewButton);
+
+            if (currentUser != null && currentUser.getRole().equals("Admin")) {
+                Button addBookButton = new Button("Add Book");
+                Button editBookButton = new Button("Edit Book");
+                Button deleteBookButton = new Button("Delete Book");
+                styleButton(addBookButton);
+                styleButton(editBookButton);
+                styleButton(deleteBookButton);
+                buttons.getChildren().addAll(addBookButton, editBookButton, deleteBookButton);
+
+                addBookButton.setOnAction(e -> showAddBookDialog(category));
+                editBookButton.setOnAction(e -> {
+                    Book selected = table.getSelectionModel().getSelectedItem();
+                    if (selected != null) {
+                        showEditBookDialog(selected);
+                    } else {
+                        showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a book to edit.");
+                    }
+                });
+                deleteBookButton.setOnAction(e -> {
+                    Book selected = table.getSelectionModel().getSelectedItem();
+                    if (selected != null) {
+                        try {
+                            store.getDb().deleteBook(selected.getId());
+                            updateTabs();
+                        } catch (SQLException ex) {
+                            showAlert(Alert.AlertType.ERROR, "Error", "Failed to delete book: " + ex.getMessage());
+                        }
+                    } else {
+                        showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a book to delete.");
+                    }
+                });
+            }
+
+            addToCartButton.setOnAction(e -> {
+                Book selected = table.getSelectionModel().getSelectedItem();
+                if (selected != null) {
+                    if (cart.addBook(selected)) {
+                        try {
+                            store.getDb().decreaseStock(selected.getId());
+                            store.getDb().savePurchase(currentUser.getLogin(), selected.getId());
+                            updateTabs();
+                            showAlert(Alert.AlertType.INFORMATION, "Success", "Book added to cart!");
+                        } catch (SQLException ex) {
+                            showAlert(Alert.AlertType.ERROR, "Error", "Failed to add to cart: " + ex.getMessage());
+                        }
+                    } else {
+                        showAlert(Alert.AlertType.WARNING, "Out of Stock", "This book is sold out.");
+                    }
+                } else {
+                    showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a book to add to cart.");
+                }
+            });
+
+            rateButton.setOnAction(e -> {
+                Book selected = table.getSelectionModel().getSelectedItem();
+                if (selected != null) {
+                    showRateBookDialog(selected);
+                } else {
+                    showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a book to rate.");
+                }
+            });
+
+            reviewButton.setOnAction(e -> {
+                Book selected = table.getSelectionModel().getSelectedItem();
+                if (selected != null) {
+                    showReviewsDialog(selected);
+                } else {
+                    showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a book to review.");
+                }
+            });
+
+            filterCombo.setOnAction(e -> {
+                try {
+                    table.setItems(FXCollections.observableArrayList(
+                            store.getFilteredBooks(category.getName(), filterCombo.getValue())
+                    ));
+                } catch (SQLException ex) {
+                    showAlert(Alert.AlertType.ERROR, "Error", "Failed to filter books: " + ex.getMessage());
+                }
+            });
+
+            try {
+                table.setItems(FXCollections.observableArrayList(
+                        store.getFilteredBooks(category.getName(), "Default")
+                ));
+            } catch (SQLException ex) {
+                showAlert(Alert.AlertType.ERROR, "Error", "Failed to load books: " + ex.getMessage());
+            }
+
+            content.getChildren().addAll(filterCombo, table, buttons);
+            tab.setContent(content);
+            tabPane.getTabs().add(tab);
+        }
+
+        Tab cartTab = new Tab("Cart");
+        VBox cartContent = new VBox(10);
+        cartContent.setPadding(new Insets(10));
+        TableView<Book> cartTable = new TableView<>();
+        TableColumn<Book, String> cartNameColumn = new TableColumn<>("Name");
+        cartNameColumn.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getName()));
+        TableColumn<Book, String> cartPriceColumn = new TableColumn<>("Price");
+        cartPriceColumn.setCellValueFactory(cellData -> new SimpleStringProperty("$" + cellData.getValue().getPrice()));
+        cartTable.getColumns().addAll(cartNameColumn, cartPriceColumn);
+        cartTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        cartTable.setItems(FXCollections.observableArrayList(cart.getBooks()));
+
+        Button removeFromCartButton = new Button("Remove from Cart");
+        Button clearCartButton = new Button("Clear Cart");
+        styleButton(removeFromCartButton);
+        styleButton(clearCartButton);
+
+        removeFromCartButton.setOnAction(e -> {
+            Book selected = cartTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                int index = cartTable.getSelectionModel().getSelectedIndex();
+                cart.removeBook(index);
+                cartTable.setItems(FXCollections.observableArrayList(cart.getBooks()));
+            } else {
+                showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a book to remove.");
             }
         });
 
-        JPanel inputPanel = new JPanel(new BorderLayout(5, 5));
-        inputPanel.add(new JScrollPane(reviewArea), BorderLayout.CENTER);
-        inputPanel.add(addReviewButton, BorderLayout.EAST);
-        dialog.add(inputPanel, BorderLayout.SOUTH);
-        dialog.add(buttonPanel, BorderLayout.NORTH);
-        dialog.setVisible(true);
-    }
+        clearCartButton.setOnAction(e -> {
+            cart.clear();
+            cartTable.setItems(FXCollections.observableArrayList(cart.getBooks()));
+        });
 
-    private void handleReaction(int bookId, JTable reviewTable, DefaultTableModel reviewModel, String reaction) {
+        cartContent.getChildren().addAll(cartTable, removeFromCartButton, clearCartButton);
+        cartTab.setContent(cartContent);
+        tabPane.getTabs().add(cartTab);
+
+        Tab messagesTab = new Tab("Messages");
+        VBox messagesContent = new VBox(10);
+        messagesContent.setPadding(new Insets(10));
+
         if (currentUser == null) {
-            JOptionPane.showMessageDialog(this, "Please login to react", "Warning", JOptionPane.WARNING_MESSAGE);
-            showLoginOrRegisterDialog();
-            return;
-        }
+            // Если пользователь не вошел, показываем сообщение о необходимости входа
+            Label loginRequiredLabel = new Label("Please log in to view messages.");
+            messagesContent.getChildren().add(loginRequiredLabel);
+        } else {
+            // Пользователь вошел, загружаем сообщения
+            ListView<String> messagesList = new ListView<>();
+            ComboBox<String> recipientCombo = new ComboBox<>();
+            TextArea messageArea = new TextArea();
+            messageArea.setPromptText("Type your message...");
+            Button sendMessageButton = new Button("Send Message");
+            styleButton(sendMessageButton);
 
-        int selectedRow = reviewTable.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Select a review to react to", "Warning", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
 
-        try {
-            List<Review> reviews = store.getDb().getReviews(bookId);
-            int reviewId = reviews.get(selectedRow).getId();
-            String userReaction = store.getDb().getUserReaction(currentUser.getLogin(), reviewId);
-            if (userReaction != null) {
-                JOptionPane.showMessageDialog(this, "You have already reacted to this review", "Warning", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
+                List<User> users = store.getAllUsers();
+                recipientCombo.setItems(FXCollections.observableArrayList(
+                        users.stream().map(User::getLogin).filter(login -> !login.equals(currentUser.getLogin())).toList()
+                ));
+                List<Message> messages = store.getMessages(currentUser.getLogin());
+                messagesList.setItems(FXCollections.observableArrayList(
+                        messages.stream().map(msg -> String.format(
+                                "[%s] %s -> %s: %s",
+                                msg.getTimestamp(), msg.getSenderLogin(), msg.getReceiverLogin(), msg.getText()
+                        )).toList()
+                ));
 
-            int likes = (int) reviewModel.getValueAt(selectedRow, 2);
-            int dislikes = (int) reviewModel.getValueAt(selectedRow, 3);
-            if (reaction.equals("LIKE")) {
-                likes++;
-            } else if (reaction.equals("DISLIKE")) {
-                dislikes++;
-            }
-            store.getDb().saveReaction(currentUser.getLogin(), reviewId, reaction);
-            store.getDb().updateReviewLikes(reviewId, likes, dislikes);
-            loadReviews(bookId, reviewModel, null);
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(this, "Error: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
 
-    private void loadReviews(int bookId, DefaultTableModel model, Integer parentId) {
-        model.setRowCount(0);
-        List<Review> reviews = store.getReviews(bookId);
-        loadReviewHierarchy(reviews, model, parentId, 0);
-    }
-
-    private void loadReviewHierarchy(List<Review> reviews, DefaultTableModel model, Integer parentId, int depth) {
-        for (Review review : reviews) {
-            if ((parentId == null && review.getParentId() == null) || (parentId != null && parentId.equals(review.getParentId()))) {
-                String indent = "  ".repeat(depth * 2);
-                String displayText = review.getText();
-                if (review.getParentId() != null) {
-                    Review parentReview = reviews.stream()
-                            .filter(r -> r.getId() == review.getParentId())
-                            .findFirst()
-                            .orElse(null);
-                    if (parentReview != null) {
-                        displayText = "<html><font color='gray' size='2'>Reply to " + parentReview.getUserLogin() + "</font><br>" + review.getText() + "</html>";
-                    }
+            sendMessageButton.setOnAction(e -> {
+                String recipient = recipientCombo.getValue();
+                String text = messageArea.getText().trim();
+                if (recipient == null || text.isEmpty()) {
+                    showAlert(Alert.AlertType.WARNING, "Invalid Input", "Please select a recipient and enter a message.");
+                    return;
                 }
-                model.addRow(new Object[]{
-                        review.getUserLogin(),
-                        indent + displayText,
-                        review.getLikes(),
-                        review.getDislikes()
-                });
-                loadReviewHierarchy(review.getReplies(), model, review.getId(), depth + 1);
-            }
-        }
-    }
-
-    private void addReview(int bookId, DefaultTableModel reviewModel, Integer parentId) {
-        if (currentUser == null) {
-            JOptionPane.showMessageDialog(this, "Please login to leave a review", "Warning", JOptionPane.WARNING_MESSAGE);
-            showLoginOrRegisterDialog();
-            return;
-        }
-
-        JTextArea reviewText = new JTextArea(5, 20);
-        JPanel panel = new JPanel(new BorderLayout(10, 10));
-        panel.add(new JLabel(parentId == null ? "Your Review:" : "Your Reply:"), BorderLayout.NORTH);
-        panel.add(new JScrollPane(reviewText), BorderLayout.CENTER);
-
-        int result = JOptionPane.showConfirmDialog(this, panel, parentId == null ? "Add Review" : "Add Reply", JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
-            String text = reviewText.getText().trim();
-            if (text.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "Review cannot be empty", "Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            try {
-                store.addReview(bookId, currentUser.getLogin(), text, parentId);
-                loadReviews(bookId, reviewModel, null);
-            } catch (SQLException e) {
-                JOptionPane.showMessageDialog(this, "Error adding review: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-            }
-        }
-    }
-
-    private void loadUsers(DefaultTableModel model) {
-        model.setRowCount(0);
-        if (currentUser != null) {
-            for (User user : store.getAllUsers()) {
-                if (!user.getLogin().equals(currentUser.getLogin())) {
-                    model.addRow(new Object[]{user.getLogin(), user.getName(), user.getAvatarPath()});
+                try {
+                    store.sendMessage(currentUser.getLogin(), recipient, text);
+                    List<Message> newMessages = store.getMessages(currentUser.getLogin());
+                    messagesList.setItems(FXCollections.observableArrayList(
+                            newMessages.stream().map(msg -> String.format(
+                                    "[%s] %s -> %s: %s",
+                                    msg.getTimestamp(), msg.getSenderLogin(), msg.getReceiverLogin(), msg.getText()
+                            )).toList()
+                    ));
+                    messageArea.clear();
+                } catch (SQLException ex) {
+                    showAlert(Alert.AlertType.ERROR, "Error", "Failed to send message: " + ex.getMessage());
                 }
-            }
-        }
-    }
+            });
 
-    private void switchAccount(JTable usersTable) {
-        int selectedRow = usersTable.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Select an account to switch", "Warning", JOptionPane.WARNING_MESSAGE);
-            return;
+            messagesContent.getChildren().addAll(recipientCombo, messageArea, sendMessageButton, messagesList);
         }
 
-        String login = (String) usersTable.getValueAt(selectedRow, 0);
-        JPasswordField passwordField = new JPasswordField(10);
-        JPanel panel = new JPanel(new GridLayout(1, 2, 10, 10));
-        panel.add(new JLabel("Enter password for " + login + ":"));
-        panel.add(passwordField);
+        messagesTab.setContent(messagesContent);
+        tabPane.getTabs().add(messagesTab);
 
-        int result = JOptionPane.showConfirmDialog(this, panel, "Switch Account", JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
-            String password = new String(passwordField.getPassword());
-            User user = store.findUser(login);
-            if (user != null && user.authenticate(password)) {
-                currentUser = user;
-                updateTabs();
-                JOptionPane.showMessageDialog(this, "Switched to " + login, "Success", JOptionPane.INFORMATION_MESSAGE);
-            } else {
-                JOptionPane.showMessageDialog(this, "Invalid password", "Error", JOptionPane.ERROR_MESSAGE);
-            }
+        Tab accountTab = new Tab("Account");
+        VBox accountContent = new VBox(10);
+        accountContent.setPadding(new Insets(10));
+        Label userInfo = new Label(currentUser != null ?
+                String.format("Login: %s\nName: %s\nEmail: %s\nBirth Date: %s\nRole: %s",
+                        currentUser.getLogin(), currentUser.getName(), currentUser.getEmail(),
+                        currentUser.getBirthDate(), currentUser.getRole()) :
+                "Not logged in");
+        Button logoutButton = new Button("Logout");
+        styleButton(logoutButton);
+
+        logoutButton.setOnAction(e -> {
+            currentUser = null;
+            cart.clear();
+            updateTabs();
+            showLoginOrRegisterDialog();
+        });
+
+        accountContent.getChildren().addAll(userInfo, logoutButton);
+        if (currentUser != null && currentUser.getRole().equals("Admin")) {
+            Button manageUsersButton = new Button("Manage Users");
+            styleButton(manageUsersButton);
+            manageUsersButton.setOnAction(e -> showManageUsersDialog());
+            accountContent.getChildren().add(manageUsersButton);
         }
-    }
-
-    private void deleteAccount(JTable usersTable) {
-        int selectedRow = usersTable.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Select an account to delete", "Warning", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-
-        String login = (String) usersTable.getValueAt(selectedRow, 0);
-        if (login.equals("admin")) {
-            JOptionPane.showMessageDialog(this, "Cannot delete admin account", "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        int confirm = JOptionPane.showConfirmDialog(this, "Are you sure you want to delete " + login + "?", "Confirm Deletion", JOptionPane.YES_NO_OPTION);
-        if (confirm == JOptionPane.YES_OPTION) {
-            try {
-                store.removeUser(login);
-                updateTabs();
-                JOptionPane.showMessageDialog(this, "Account deleted", "Success", JOptionPane.INFORMATION_MESSAGE);
-            } catch (SQLException e) {
-                JOptionPane.showMessageDialog(this, "Error deleting account: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-            }
-        }
-    }
-
-    private void styleButton(JButton button) {
-        button.setFont(new Font("Arial", Font.PLAIN, 14));
-        button.setBackground(new Color(135, 206, 235));
-        button.setForeground(Color.BLACK);
-        button.setFocusPainted(false);
-        button.setBorder(BorderFactory.createRaisedBevelBorder());
-        button.setPreferredSize(new Dimension(120, 40));
-    }
-
-    private void loadBooks(Category category, DefaultTableModel model) {
-        try {
-            java.sql.ResultSet rs = store.getDb().getBooks(category.getName());
-            model.setRowCount(0);
-            category.readBooks().clear();
-            while (rs.next()) {
-                int id = rs.getInt("id");
-                String name = rs.getString("name");
-                double price = rs.getDouble("price");
-                String description = rs.getString("description");
-                String coverPath = rs.getString("cover_path");
-                category.createBook(id, name, price, description, coverPath);
-                int rating = store.getDb().getBookRating(id);
-                model.addRow(new Object[]{id, name, price, description, coverPath, rating, "Like", "Dislike"});
-            }
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(this, "Error loading books: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private void loadCart(DefaultTableModel model) {
-        model.setRowCount(0);
-        for (Book book : cart.getBooks()) {
-            model.addRow(new Object[]{book.getId(), book.getName(), book.getPrice(), book.getDescription(), book.getCoverPath()});
-        }
-    }
-
-    private String calculateTotal() {
-        double total = cart.getBooks().stream().mapToDouble(Book::getPrice).sum();
-        DecimalFormat df = new DecimalFormat("#.##");
-        return df.format(total) + " €";
-    }
-
-    private String uploadCover(File sourceFile) {
-        if (sourceFile == null) return null;
-        try {
-            File destFile = new File("covers/" + sourceFile.getName());
-            Files.copy(sourceFile.toPath(), destFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            return destFile.getPath();
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, "Error uploading cover: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-            return null;
-        }
+        accountTab.setContent(accountContent);
+        tabPane.getTabs().add(accountTab);
     }
 
     private void showAddBookDialog(Category category) {
-        JTextField nameField = new JTextField(10);
-        JTextField priceField = new JTextField(10);
-        JTextField descField = new JTextField(10);
-        JButton uploadButton = new JButton("Upload Cover");
-        JLabel coverLabel = new JLabel("No cover selected");
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Add Book");
 
-        JPanel panel = new JPanel(new GridLayout(5, 2, 10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        panel.add(new JLabel("Name:"));
-        panel.add(nameField);
-        panel.add(new JLabel("Price:"));
-        panel.add(priceField);
-        panel.add(new JLabel("Description:"));
-        panel.add(descField);
-        panel.add(new JLabel("Cover:"));
-        panel.add(uploadButton);
-        panel.add(new JLabel(""));
-        panel.add(coverLabel);
+        GridPane grid = new GridPane();
+        grid.setPadding(new Insets(20));
+        grid.setVgap(10);
+        grid.setHgap(10);
+
+        Label nameLabel = new Label("Name:");
+        TextField nameField = new TextField();
+        Label priceLabel = new Label("Price:");
+        TextField priceField = new TextField();
+        Label descriptionLabel = new Label("Description:");
+        TextArea descriptionArea = new TextArea();
+        Label stockLabel = new Label("Stock:");
+        TextField stockField = new TextField();
+        Label coverLabel = new Label("Cover: No file selected");
+        Button uploadButton = new Button("Upload Cover");
+        Button addButton = new Button("Add Book");
+        styleButton(uploadButton);
+        styleButton(addButton);
+
+        GridPane.setConstraints(nameLabel, 0, 0);
+        GridPane.setConstraints(nameField, 1, 0);
+        GridPane.setConstraints(priceLabel, 0, 1);
+        GridPane.setConstraints(priceField, 1, 1);
+        GridPane.setConstraints(descriptionLabel, 0, 2);
+        GridPane.setConstraints(descriptionArea, 1, 2);
+        GridPane.setConstraints(stockLabel, 0, 3);
+        GridPane.setConstraints(stockField, 1, 3);
+        GridPane.setConstraints(uploadButton, 0, 4);
+        GridPane.setConstraints(coverLabel, 1, 4);
+        GridPane.setConstraints(addButton, 1, 5);
 
         File[] selectedFile = {null};
-        uploadButton.addActionListener(e -> {
-            JFileChooser fileChooser = new JFileChooser();
-            fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Images", "jpg", "png"));
-            int returnVal = fileChooser.showOpenDialog(this);
-            if (returnVal == JFileChooser.APPROVE_OPTION) {
-                selectedFile[0] = fileChooser.getSelectedFile();
-                coverLabel.setText(selectedFile[0].getName());
+        uploadButton.setOnAction(e -> {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Images", "*.jpg", "*.png"));
+            File file = fileChooser.showOpenDialog(primaryStage);
+            if (file != null) {
+                selectedFile[0] = file;
+                coverLabel.setText(file.getName());
             }
         });
 
-        int result = JOptionPane.showConfirmDialog(this, panel, "Add Book", JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
+        addButton.setOnAction(e -> {
+            String name = nameField.getText().trim();
             String priceText = priceField.getText().trim();
-            if (priceText.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "Price cannot be empty", "Error", JOptionPane.ERROR_MESSAGE);
+            String description = descriptionArea.getText().trim();
+            String stockText = stockField.getText().trim();
+
+            if (name.isEmpty() || !validatePrice(priceText) || !validateStock(stockText)) {
+                showAlert(Alert.AlertType.ERROR, "Invalid Input", "Please check name, price, and stock.");
                 return;
             }
+
             try {
                 double price = Double.parseDouble(priceText);
-                if (price < 0) {
-                    JOptionPane.showMessageDialog(this, "Price cannot be negative", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                String name = nameField.getText().trim();
-                if (name.isEmpty()) {
-                    JOptionPane.showMessageDialog(this, "Name cannot be empty", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                String coverPath = uploadCover(selectedFile[0]);
-                Book book = new Book(0, name, price, descField.getText(), category, coverPath);
+                int stock = Integer.parseInt(stockText);
+                String coverPath = selectedFile[0] != null ? uploadFile(selectedFile[0], "covers") : null;
+                Book book = new Book(0, name, price, description, category, coverPath, stock);
                 store.getDb().saveBook(book);
                 updateTabs();
-            } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "Invalid price format: " + priceText, "Error", JOptionPane.ERROR_MESSAGE);
-            } catch (SQLException e) {
-                JOptionPane.showMessageDialog(this, "Database error: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-            }
-        }
-    }
-
-    private void showEditBookDialog(Category category, JTable table) {
-        int selectedRow = table.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Select a book to edit", "Warning", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-
-        int id = (int) table.getValueAt(selectedRow, 0);
-        JTextField nameField = new JTextField((String) table.getValueAt(selectedRow, 1), 10);
-        JTextField priceField = new JTextField(table.getValueAt(selectedRow, 2).toString(), 10);
-        JTextField descField = new JTextField((String) table.getValueAt(selectedRow, 3), 10);
-        JButton uploadButton = new JButton("Upload Cover");
-        JLabel coverLabel = new JLabel(table.getValueAt(selectedRow, 4) != null ? table.getValueAt(selectedRow, 4).toString() : "No cover");
-
-        JPanel panel = new JPanel(new GridLayout(5, 2, 10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        panel.add(new JLabel("Name:"));
-        panel.add(nameField);
-        panel.add(new JLabel("Price:"));
-        panel.add(priceField);
-        panel.add(new JLabel("Description:"));
-        panel.add(descField);
-        panel.add(new JLabel("Cover:"));
-        panel.add(uploadButton);
-        panel.add(new JLabel(""));
-        panel.add(coverLabel);
-
-        File[] selectedFile = {null};
-        uploadButton.addActionListener(e -> {
-            JFileChooser fileChooser = new JFileChooser();
-            fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Images", "jpg", "png"));
-            int returnVal = fileChooser.showOpenDialog(this);
-            if (returnVal == JFileChooser.APPROVE_OPTION) {
-                selectedFile[0] = fileChooser.getSelectedFile();
-                coverLabel.setText(selectedFile[0].getName());
+                dialog.close();
+            } catch (SQLException | IOException ex) {
+                showAlert(Alert.AlertType.ERROR, "Error", "Failed to add book: " + ex.getMessage());
             }
         });
 
-        int result = JOptionPane.showConfirmDialog(this, panel, "Edit Book", JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
+        grid.getChildren().addAll(
+                nameLabel, nameField, priceLabel, priceField,
+                descriptionLabel, descriptionArea, stockLabel, stockField,
+                uploadButton, coverLabel, addButton
+        );
+        Scene scene = new Scene(grid, 500, 400);
+        dialog.setScene(scene);
+        dialog.showAndWait();
+    }
+
+    private void showEditBookDialog(Book book) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Edit Book");
+
+        GridPane grid = new GridPane();
+        grid.setPadding(new Insets(20));
+        grid.setVgap(10);
+        grid.setHgap(10);
+
+        Label nameLabel = new Label("Name:");
+        TextField nameField = new TextField(book.getName());
+        Label priceLabel = new Label("Price:");
+        TextField priceField = new TextField(String.valueOf(book.getPrice()));
+        Label descriptionLabel = new Label("Description:");
+        TextArea descriptionArea = new TextArea(book.getDescription());
+        Label stockLabel = new Label("Stock:");
+        TextField stockField = new TextField(String.valueOf(book.getStock()));
+        Label coverLabel = new Label("Cover: " + (book.getCoverPath() != null ? new File(book.getCoverPath()).getName() : "No file"));
+        Button uploadButton = new Button("Upload New Cover");
+        Button saveButton = new Button("Save Changes");
+        styleButton(uploadButton);
+        styleButton(saveButton);
+
+        GridPane.setConstraints(nameLabel, 0, 0);
+        GridPane.setConstraints(nameField, 1, 0);
+        GridPane.setConstraints(priceLabel, 0, 1);
+        GridPane.setConstraints(priceField, 1, 1);
+        GridPane.setConstraints(descriptionLabel, 0, 2);
+        GridPane.setConstraints(descriptionArea, 1, 2);
+        GridPane.setConstraints(stockLabel, 0, 3);
+        GridPane.setConstraints(stockField, 1, 3);
+        GridPane.setConstraints(uploadButton, 0, 4);
+        GridPane.setConstraints(coverLabel, 1, 4);
+        GridPane.setConstraints(saveButton, 1, 5);
+
+        File[] selectedFile = {null};
+        uploadButton.setOnAction(e -> {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Images", "*.jpg", "*.png"));
+            File file = fileChooser.showOpenDialog(primaryStage);
+            if (file != null) {
+                selectedFile[0] = file;
+                coverLabel.setText(file.getName());
+            }
+        });
+
+        saveButton.setOnAction(e -> {
+            String name = nameField.getText().trim();
             String priceText = priceField.getText().trim();
-            if (priceText.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "Price cannot be empty", "Error", JOptionPane.ERROR_MESSAGE);
+            String description = descriptionArea.getText().trim();
+            String stockText = stockField.getText().trim();
+
+            if (name.isEmpty() || !validatePrice(priceText) || !validateStock(stockText)) {
+                showAlert(Alert.AlertType.ERROR, "Invalid Input", "Please check name, price, and stock.");
+                return;
+            }
+
+            try {
+                double price = Double.parseDouble(priceText);
+                int stock = Integer.parseInt(stockText);
+                String coverPath = selectedFile[0] != null ? uploadFile(selectedFile[0], "covers") : book.getCoverPath();
+                store.getDb().updateBook(book.getId(), name, price, description, coverPath, stock);
+                updateTabs();
+                dialog.close();
+            } catch (SQLException | IOException ex) {
+                showAlert(Alert.AlertType.ERROR, "Error", "Failed to update book: " + ex.getMessage());
+            }
+        });
+
+        grid.getChildren().addAll(
+                nameLabel, nameField, priceLabel, priceField,
+                descriptionLabel, descriptionArea, stockLabel, stockField,
+                uploadButton, coverLabel, saveButton
+        );
+        Scene scene = new Scene(grid, 500, 400);
+        dialog.setScene(scene);
+        dialog.showAndWait();
+    }
+
+    private void showRateBookDialog(Book book) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Rate Book");
+
+        VBox vbox = new VBox(10);
+        vbox.setPadding(new Insets(20));
+        vbox.setAlignment(Pos.CENTER);
+
+        Label label = new Label("Rate " + book.getName() + " (1-5):");
+        ComboBox<Integer> ratingCombo = new ComboBox<>(FXCollections.observableArrayList(1, 2, 3, 4, 5));
+        Button submitButton = new Button("Submit Rating");
+        styleButton(submitButton);
+
+        try {
+            Integer currentRating = store.getDb().getUserBookRating(currentUser.getLogin(), book.getId());
+            if (currentRating != null) {
+                ratingCombo.setValue(currentRating);
+            }
+        } catch (SQLException ex) {
+            showAlert(Alert.AlertType.ERROR, "Error", "Failed to load current rating: " + ex.getMessage());
+        }
+
+        submitButton.setOnAction(e -> {
+            Integer rating = ratingCombo.getValue();
+            if (rating == null) {
+                showAlert(Alert.AlertType.WARNING, "No Rating", "Please select a rating.");
                 return;
             }
             try {
-                double price = Double.parseDouble(priceText);
-                if (price < 0) {
-                    JOptionPane.showMessageDialog(this, "Price cannot be negative", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                String name = nameField.getText().trim();
-                if (name.isEmpty()) {
-                    JOptionPane.showMessageDialog(this, "Name cannot be empty", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                String coverPath = selectedFile[0] != null ? uploadCover(selectedFile[0]) : (table.getValueAt(selectedRow, 4) != null ? table.getValueAt(selectedRow, 4).toString() : null);
-                store.getDb().updateBook(id, name, price, descField.getText(), coverPath);
+                store.getDb().saveBookRating(currentUser.getLogin(), book.getId(), rating);
                 updateTabs();
-            } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "Invalid price format: " + priceText, "Error", JOptionPane.ERROR_MESSAGE);
-            } catch (SQLException e) {
-                JOptionPane.showMessageDialog(this, "Database error: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                dialog.close();
+            } catch (SQLException ex) {
+                showAlert(Alert.AlertType.ERROR, "Error", "Failed to save rating: " + ex.getMessage());
             }
-        }
+        });
+
+        vbox.getChildren().addAll(label, ratingCombo, submitButton);
+        Scene scene = new Scene(vbox, 300, 200);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 
-    private void deleteBook(Category category, JTable table) {
-        int selectedRow = table.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Select a book to delete", "Warning", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
+    private void showReviewsDialog(Book book) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Reviews for " + book.getName());
 
-        int id = (int) table.getValueAt(selectedRow, 0);
-        try {
-            store.getDb().deleteBook(id);
-            updateTabs();
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(this, "Error deleting book: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
+        VBox vbox = new VBox(10);
+        vbox.setPadding(new Insets(20));
 
-    private void takeBook(Category category, JTable table) {
-        if (currentUser == null) {
-            JOptionPane.showMessageDialog(this, "Please login to take a book", "Warning", JOptionPane.WARNING_MESSAGE);
-            showLoginOrRegisterDialog();
-            return;
-        }
+        TreeView<String> reviewTree = new TreeView<>();
+        TreeItem<String> root = new TreeItem<>("Reviews");
+        reviewTree.setRoot(root);
+        reviewTree.setShowRoot(false);
 
-        int selectedRow = table.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Select a book to take", "Warning", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
+        TextArea newReviewArea = new TextArea();
+        newReviewArea.setPromptText("Write your review...");
+        Button addReviewButton = new Button("Add Review");
+        styleButton(addReviewButton);
 
-        int id = (int) table.getValueAt(selectedRow, 0);
-        String name = (String) table.getValueAt(selectedRow, 1);
-        double price = (double) table.getValueAt(selectedRow, 2);
-        String description = (String) table.getValueAt(selectedRow, 3);
-        String coverPath = table.getValueAt(selectedRow, 4) != null ? table.getValueAt(selectedRow, 4).toString() : null;
-        Book book = new Book(id, name, price, description, category, coverPath);
-        cart.addBook(book);
-        updateTabs();
-        JOptionPane.showMessageDialog(this, "Book added to cart", "Success", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private void removeFromCart(JTable cartTable) {
-        int selectedRow = cartTable.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Select a book to remove", "Warning", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-
-        cart.removeBook(selectedRow);
-        updateTabs();
-        JOptionPane.showMessageDialog(this, "Book removed from cart", "Success", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private void logOut() {
-        cart.clear();
-        currentUser = null;
-        updateTabs();
-    }
-
-    private class ImageRenderer extends DefaultTableCellRenderer {
-        @Override
-        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
-            JLabel label = new JLabel();
-            if (value != null && !value.toString().equals("No cover") && !value.toString().isEmpty()) {
-                try {
-                    ImageIcon icon = new ImageIcon(value.toString());
-                    Image img = icon.getImage().getScaledInstance(70, 70, Image.SCALE_SMOOTH);
-                    label.setIcon(new ImageIcon(img));
-                } catch (Exception e) {
-                    label.setText("No image");
-                }
-            } else {
-                label.setText("No image");
+        addReviewButton.setOnAction(e -> {
+            String text = newReviewArea.getText().trim();
+            if (text.isEmpty()) {
+                showAlert(Alert.AlertType.WARNING, "Invalid Input", "Review cannot be empty.");
+                return;
             }
-            label.setHorizontalAlignment(JLabel.CENTER);
-            return label;
-        }
-    }
-
-    private class ButtonRenderer implements TableCellRenderer {
-        private final JButton button;
-
-        ButtonRenderer(String text) {
-            button = new JButton(text);
-            button.setFont(new Font("Arial", Font.PLAIN, 12));
-            button.setBackground(new Color(135, 206, 235));
-            button.setForeground(Color.BLACK);
-        }
-
-        @Override
-        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
-            return button;
-        }
-    }
-
-    private class ButtonEditor extends AbstractCellEditor implements TableCellEditor {
-        private final JButton button;
-        private final JTable table;
-        private final BookStore store;
-        private int row;
-
-        ButtonEditor(JButton button, JTable table, BookStore store) {
-            this.button = button;
-            this.table = table;
-            this.store = store;
-            button.addActionListener(e -> {
-                int bookId = (int) table.getValueAt(row, 0);
-                String reaction = button.getText().toUpperCase();
-                try {
-                    if (currentUser == null) {
-                        JOptionPane.showMessageDialog(MainWindow.this, "Please login to rate", "Warning", JOptionPane.WARNING_MESSAGE);
-                        showLoginOrRegisterDialog();
-                    } else if (store.getDb().getUserBookReaction(currentUser.getLogin(), bookId) != null) {
-                        JOptionPane.showMessageDialog(MainWindow.this, "You have already rated this book", "Warning", JOptionPane.WARNING_MESSAGE);
-                    } else {
-                        store.getDb().saveBookReaction(currentUser.getLogin(), bookId, reaction);
-                        DefaultTableModel model = (DefaultTableModel) table.getModel();
-                        loadBooks((Category) store.readCategories().stream().filter(c -> c.getName().equals(tabbedPane.getTitleAt(tabbedPane.getSelectedIndex()))).findFirst().get(), model);
+            try {
+                TreeItem<String> selected = reviewTree.getSelectionModel().getSelectedItem();
+                Integer parentId = null;
+                if (selected != null && !selected.getValue().equals("Reviews")) {
+                    for (Review review : store.getReviews(book.getId())) {
+                        if (selected.getValue().contains("[" + review.getUserLogin() + "]")) {
+                            parentId = review.getId();
+                            break;
+                        }
                     }
-                } catch (SQLException ex) {
-                    JOptionPane.showMessageDialog(MainWindow.this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                 }
-                fireEditingStopped();
-            });
-        }
+                store.addReview(book.getId(), currentUser.getLogin(), text, parentId);
+                newReviewArea.clear();
+                updateReviewTree(reviewTree, book);
+            } catch (SQLException ex) {
+                showAlert(Alert.AlertType.ERROR, "Error", "Failed to add review: " + ex.getMessage());
+            }
+        });
 
-        @Override
-        public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
-            this.row = row;
-            return button;
-        }
+        updateReviewTree(reviewTree, book);
+        vbox.getChildren().addAll(reviewTree, newReviewArea, addReviewButton);
+        Scene scene = new Scene(vbox, 600, 400);
+        dialog.setScene(scene);
+        dialog.showAndWait();
+    }
 
-        @Override
-        public Object getCellEditorValue() {
-            return button.getText();
+    private void updateReviewTree(TreeView<String> reviewTree, Book book) {
+        TreeItem<String> root = reviewTree.getRoot();
+        root.getChildren().clear();
+
+
+            List<Review> reviews = store.getReviews(book.getId());
+            for (Review review : reviews) {
+                if (review.getParentId() == null) {
+                    TreeItem<String> item = new TreeItem<>(
+                            "[" + review.getUserLogin() + "] " + review.getText() +
+                                    " (Likes: " + review.getLikes() + ", Dislikes: " + review.getDislikes() + ")"
+                    );
+                    addReplies(item, review, reviews);
+                    root.getChildren().add(item);
+                }
+            }
+
+    }
+
+    private void addReplies(TreeItem<String> parentItem, Review parentReview, List<Review> reviews) {
+        for (Review review : reviews) {
+            if (review.getParentId() != null && review.getParentId() == parentReview.getId()) {
+                TreeItem<String> item = new TreeItem<>(
+                        "[" + review.getUserLogin() + "] " + review.getText() +
+                                " (Likes: " + review.getLikes() + ", Dislikes: " + review.getDislikes() + ")"
+                );
+                addReplies(item, review, reviews);
+                parentItem.getChildren().add(item);
+            }
         }
     }
 
-    private class RatingRenderer extends DefaultTableCellRenderer {
-        @Override
-        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
-            JLabel label = new JLabel();
-            if (value != null) {
-                int rating = (int) value;
-                label.setText(String.valueOf(rating));
-                if (rating > 0) {
-                    label.setForeground(new Color(0, 100, 0));
-                } else if (rating < 0) {
-                    label.setForeground(Color.RED);
-                } else {
-                    label.setForeground(Color.GRAY);
+    private void showManageUsersDialog() {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(primaryStage);
+        dialog.setTitle("Manage Users");
+
+        VBox vbox = new VBox(10);
+        vbox.setPadding(new Insets(20));
+
+        TableView<User> userTable = new TableView<>();
+        TableColumn<User, String> loginColumn = new TableColumn<>("Login");
+        loginColumn.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getLogin()));
+        TableColumn<User, String> nameColumn = new TableColumn<>("Name");
+        nameColumn.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getName()));
+        TableColumn<User, String> roleColumn = new TableColumn<>("Role");
+        roleColumn.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getRole()));
+        userTable.getColumns().addAll(loginColumn, nameColumn, roleColumn);
+        userTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+
+            userTable.setItems(FXCollections.observableArrayList(store.getAllUsers()));
+
+
+        Button changeRoleButton = new Button("Change Role");
+        Button deleteUserButton = new Button("Delete User");
+        styleButton(changeRoleButton);
+        styleButton(deleteUserButton);
+
+        changeRoleButton.setOnAction(e -> {
+            User selected = userTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                if (selected.getLogin().equals("admin")) {
+                    showAlert(Alert.AlertType.WARNING, "Restricted", "Cannot change role of admin.");
+                    return;
+                }
+                String newRole = selected.getRole().equals("Admin") ? "Client" : "Admin";
+                try {
+                    store.getDb().updateUserRole(selected.getLogin(), newRole);
+                    userTable.setItems(FXCollections.observableArrayList(store.getAllUsers()));
+                } catch (SQLException ex) {
+                    showAlert(Alert.AlertType.ERROR, "Error", "Failed to change role: " + ex.getMessage());
                 }
             } else {
-                label.setText("0");
-                label.setForeground(Color.GRAY);
+                showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a user.");
             }
-            label.setHorizontalAlignment(JLabel.CENTER);
-            return label;
-        }
+        });
+
+        deleteUserButton.setOnAction(e -> {
+            User selected = userTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                if (selected.getLogin().equals("admin")) {
+                    showAlert(Alert.AlertType.WARNING, "Restricted", "Cannot delete admin.");
+                    return;
+                }
+                try {
+                    store.removeUser(selected.getLogin());
+                    userTable.setItems(FXCollections.observableArrayList(store.getAllUsers()));
+                } catch (SQLException ex) {
+                    showAlert(Alert.AlertType.ERROR, "Error", "Failed to delete user: " + ex.getMessage());
+                }
+            } else {
+                showAlert(Alert.AlertType.WARNING, "No Selection", "Please select a user.");
+            }
+        });
+
+        vbox.getChildren().addAll(userTable, changeRoleButton, deleteUserButton);
+        Scene scene = new Scene(vbox, 600, 400);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 }

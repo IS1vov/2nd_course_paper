@@ -14,24 +14,24 @@ public class BookStore {
             db.createTables();
             User admin = findUser("admin");
             if (admin == null) {
-                System.out.println("Создаём пользователя admin...");
+                System.out.println("Creating admin user...");
                 try {
-                    db.registerAdmin("admin", "Admin", "admin123", "avatars/ava.jpg");
+                    db.registerAdmin("admin", "Admin", "User", "admin@example.com", "1980-01-01", "admin123", "avatars/ava.jpg");
                     admin = findUser("admin");
                     if (admin != null) {
-                        System.out.println("Админ успешно создан с логином: admin, паролем: admin123, роль: " + admin.getRole());
+                        System.out.println("Admin created successfully: login=admin, password=admin123, role=" + admin.getRole());
                     } else {
-                        System.out.println("Ошибка: Админ не найден после попытки создания!");
+                        System.out.println("Error: Admin not found after creation!");
                     }
                 } catch (SQLException e) {
-                    System.err.println("Ошибка при создании админа: " + e.getMessage());
+                    System.err.println("Error creating admin: " + e.getMessage());
                     e.printStackTrace();
                 }
             } else {
-                System.out.println("Админ уже существует: " + admin.getName() + ", роль: " + admin.getRole());
+                System.out.println("Admin already exists: " + admin.getName() + ", role: " + admin.getRole());
             }
         } catch (SQLException e) {
-            System.err.println("Ошибка при инициализации базы данных: " + e.getMessage());
+            System.err.println("Error initializing database: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -44,20 +44,20 @@ public class BookStore {
         try {
             return db.findUser(login);
         } catch (SQLException e) {
-            System.err.println("Ошибка поиска пользователя: " + e.getMessage());
+            System.err.println("Error finding user: " + e.getMessage());
             return null;
         }
     }
 
-    public void registerUser(String login, String name, String password, String avatarPath) throws SQLException {
-        db.registerUser(login, name, password, avatarPath);
+    public void registerUser(String login, String firstName, String lastName, String email, String birthDate, String password, String avatarPath) throws SQLException {
+        db.registerUser(login, firstName, lastName, email, birthDate, password, avatarPath);
     }
 
     public List<User> getAllUsers() {
         try {
             return db.getAllUsers();
         } catch (SQLException e) {
-            System.err.println("Ошибка получения пользователей: " + e.getMessage());
+            System.err.println("Error retrieving users: " + e.getMessage());
             return new ArrayList<>();
         }
     }
@@ -77,14 +77,14 @@ public class BookStore {
                 categories.add(new Category(name));
             }
         } catch (SQLException e) {
-            System.err.println("Ошибка при работе с категориями в базе данных: " + e.getMessage());
+            System.err.println("Error handling categories: " + e.getMessage());
             for (String name : categoryNames) {
                 if (!categories.stream().anyMatch(c -> c.getName().equals(name))) {
                     categories.add(new Category(name));
                 }
             }
         }
-        System.out.println("Загружено категорий: " + categories.size());
+        System.out.println("Loaded categories: " + categories.size());
         return categories;
     }
 
@@ -96,4 +96,32 @@ public class BookStore {
         return db.getReviews(bookId);
     }
 
+    public void sendMessage(String senderLogin, String receiverLogin, String text) throws SQLException {
+        db.saveMessage(senderLogin, receiverLogin, text);
+    }
+
+    public List<Message> getMessages(String userLogin) {
+        try {
+            return db.getMessages(userLogin);
+        } catch (SQLException e) {
+            System.err.println("Error retrieving messages: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    public List<Book> getFilteredBooks(String categoryName, String filterType) throws SQLException {
+        return db.getFilteredBooks(categoryName, filterType);
+    }
+
+    public int getPurchaseCount(String categoryName) throws SQLException {
+        return db.getPurchaseCount(categoryName);
+    }
+
+    public int getReviewCount(String categoryName) throws SQLException {
+        return db.getReviewCount(categoryName);
+    }
+
+    public double getAverageRating(String categoryName) throws SQLException {
+        return db.getAverageRating(categoryName);
+    }
 }

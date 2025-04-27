@@ -10,8 +10,12 @@ public class Cart {
         books = new ArrayList<>();
     }
 
-    public void addBook(Book book) {
-        books.add(book);
+    public boolean addBook(Book book) {
+        if (book.getStock() > 0) {
+            books.add(book);
+            return true;
+        }
+        return false;
     }
 
     public void removeBook(int index) {

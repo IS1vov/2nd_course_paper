@@ -8,5 +8,8 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="sqlite-jdbc-3.49.1.0" level="project" />
+    <orderEntry type="library" name="jbcrypt-0.4" level="project" />
+    <orderEntry type="library" name="jfreechart-1.5.3" level="project" />
+    <orderEntry type="library" name="jcommon-1.0.23" level="project" />
   </component>
 </module>

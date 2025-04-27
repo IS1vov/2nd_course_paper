@@ -8,9 +8,9 @@ public class Review {
     private int bookId;
     private String userLogin;
     private String text;
+    private Integer parentId;
     private int likes;
     private int dislikes;
-    private Integer parentId;
     private List<Review> replies;
 
     public Review(int id, int bookId, String userLogin, String text, int likes, int dislikes) {
@@ -39,28 +39,20 @@ public class Review {
         return text;
     }
 
-    public int getLikes() {
-        return likes;
-    }
-
-    public void setLikes(int likes) {
-        this.likes = likes;
-    }
-
-    public int getDislikes() {
-        return dislikes;
-    }
-
-    public void setDislikes(int dislikes) {
-        this.dislikes = dislikes;
-    }
-
     public Integer getParentId() {
         return parentId;
     }
 
-    public void setParentId(Integer parentId) {
+    public void setParentId(int parentId) {
         this.parentId = parentId;
+    }
+
+    public int getLikes() {
+        return likes;
+    }
+
+    public int getDislikes() {
+        return dislikes;
     }
 
     public List<Review> getReplies() {
